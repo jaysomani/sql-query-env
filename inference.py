@@ -8,9 +8,9 @@ from client import SqlQueryEnv
 from models import SqlQueryAction
 from server.tasks import TASKS
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct:groq")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
+API_BASE_URL = os.getenv("API_BASE_URL", "<your-active-api-base-url>")
+MODEL_NAME = os.getenv("MODEL_NAME", "<your-active-model-name>")
+HF_TOKEN = os.getenv("HF_TOKEN")
 HF_SPACE_URL = os.environ.get("HF_SPACE_URL", "http://localhost:8000")
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
