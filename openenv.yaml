@@ -1,0 +1,7 @@
+spec_version: 1
+name: sql_query_env
+description: A SQL query RL environment where an agent learns to write correct SQLite queries across 3 difficulty levels using an e-commerce database schema.
+type: space
+runtime: fastapi
+app: server.app:app
+port: 7860
