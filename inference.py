@@ -1,17 +1,12 @@
 import os
 import json
+import requests
 from openai import OpenAI
-from dotenv import load_dotenv
-load_dotenv()
-
-from client import SqlQueryEnv
-from models import SqlQueryAction
-from server.tasks import TASKS
 
 API_BASE_URL = os.getenv("API_BASE_URL", "<your-active-api-base-url>")
 MODEL_NAME = os.getenv("MODEL_NAME", "<your-active-model-name>")
 HF_TOKEN = os.getenv("HF_TOKEN")
-HF_SPACE_URL = os.environ.get("HF_SPACE_URL", "http://localhost:8000")
+HF_SPACE_URL = os.getenv("HF_SPACE_URL", "http://localhost:7860")
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
@@ -32,17 +27,42 @@ Respond with ONLY the raw SQL query, no explanation, no markdown, no backticks."
     )
     return response.choices[0].message.content.strip()
 
-with SqlQueryEnv(base_url=HF_SPACE_URL).sync() as env:
-    for i, task in enumerate(TASKS):
-        # reset and jump to correct task via set_task step
-        result = env.reset()
-        
-        # navigate to the right task index
-        if i > 0:
-            nav_result = env.step(SqlQueryAction(query=f"__set_task__:{i}"))
-            obs = nav_result.observation
-        else:
-            obs = result.observation
+def reset_env(task_index=0):
+    r = requests.post(f"{HF_SPACE_URL}/reset", json={"task_index": task_index})
+    return r.json()
+
+def step_env(query):
+    r = requests.post(
+        f"{HF_SPACE_URL}/step",
+        json={"action": {"query": query}}
+    )
+    return r.json()
+
+TASKS = [
+    {
+        "task_id": "task_easy",
+        "difficulty": "easy",
+        "description": "Find the names and cities of all customers who joined in 2021 or later.",
+        "schema_hint": "Table: customers(id, name, city, joined_year)",
+    },
+    {
+        "task_id": "task_medium",
+        "difficulty": "medium",
+        "description": "Find the name of each customer and the total number of orders they have placed. Only include customers who have placed at least 2 orders.",
+        "schema_hint": "Tables: customers(id, name, city, joined_year), orders(id, customer_id, product_id, quantity, order_date)",
+    },
+    {
+        "task_id": "task_hard",
+        "difficulty": "hard",
+        "description": "Find the total revenue (price * quantity) generated per product category. Return category and total_revenue, sorted by total_revenue descending.",
+        "schema_hint": "Tables: products(id, name, category, price), orders(id, customer_id, product_id, quantity, order_date)",
+    },
+]
+
+for i, task in enumerate(TASKS):
+    try:
+        obs_data = reset_env(task_index=i)
+        obs = obs_data["observation"]
 
         print(json.dumps({
             "type": "[START]",
@@ -53,33 +73,51 @@ with SqlQueryEnv(base_url=HF_SPACE_URL).sync() as env:
         total_reward = 0.0
 
         for step_num in range(3):
-            query = ask_llm(
-                task["description"],
-                task["schema_hint"],
-                obs.feedback,
-                obs.result
-            )
+            try:
+                query = ask_llm(
+                    task["description"],
+                    task["schema_hint"],
+                    obs.get("feedback", ""),
+                    obs.get("result", "")
+                )
 
-            step_result = env.step(SqlQueryAction(query=query))
-            obs = step_result.observation
-            reward = step_result.reward
-            done = step_result.done
-            total_reward = reward
+                result = step_env(query)
+                obs = result["observation"]
+                reward = result["reward"]
+                done = result["done"]
+                total_reward = reward
 
-            print(json.dumps({
-                "type": "[STEP]",
-                "step": step_num + 1,
-                "action": query,
-                "observation": obs.result,
-                "reward": reward,
-                "done": done
-            }))
+                print(json.dumps({
+                    "type": "[STEP]",
+                    "step": step_num + 1,
+                    "action": query,
+                    "observation": obs.get("result", ""),
+                    "reward": reward,
+                    "done": done
+                }))
 
-            if done or reward == 1.0:
-                break
+                if done or reward == 1.0:
+                    break
+
+            except Exception as e:
+                print(json.dumps({
+                    "type": "[STEP]",
+                    "step": step_num + 1,
+                    "action": "",
+                    "observation": f"Error: {str(e)}",
+                    "reward": 0.0,
+                    "done": False
+                }))
 
         print(json.dumps({
             "type": "[END]",
             "task_id": task["task_id"],
             "total_reward": total_reward
+        }))
+
+    except Exception as e:
+        print(json.dumps({
+            "type": "[END]",
+            "task_id": task["task_id"],
+            "total_reward": 0.0
         }))
